@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        env:
+          LINEAR_API_KEY: test-key
+          SLACK_BOT_TOKEN: xoxb-test
+          APP_API_KEY: test-api-key
+          APP_ADMIN_KEY: test-admin-key
+          DB_PATH: ':memory:'
+          NODE_ENV: test
+        run: npm test -- --coverage
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t linear-slack-status-bot:latest .
+      - name: Run Docker health check
+        run: |
+          docker run -d --name bot-test \
+            -e LINEAR_API_KEY=test \
+            -e SLACK_BOT_TOKEN=xoxb-test \
+            -e APP_API_KEY=test-key \
+            -e APP_ADMIN_KEY=test-admin-key \
+            -p 3001:3000 linear-slack-status-bot:latest
+          sleep 5
+          curl -f http://localhost:3001/api/health
+          docker stop bot-test
